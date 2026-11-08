@@ -1,0 +1,15 @@
+{
+  "configurations": [
+    {
+      "name": "CLion",
+      "includePath": [
+        "${workspaceFolder}/**"
+      ],
+      "cStandard": "c99",
+      "defines": [
+        "BLD_IMPL"
+      ]
+    }
+  ],
+  "version": 4
+}
