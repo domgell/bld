@@ -36,6 +36,7 @@ BldCmd bld_cmd_new();
 void bld_cmd_add(BldCmd* cmd, cstr string);
 void bld_cmd_pop(BldCmd* cmd);
 i32 bld_cmd_run(BldCmd* cmd);
+
 // void bld_cmd_add_fmt(BldCmd* cmd, cstr fmt, ...);
 // void bld_cmd_clear(BldCmd* cmd);
 

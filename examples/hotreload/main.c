@@ -1,36 +1,35 @@
 #define dll_export __attribute__((visibility("default")))
 
-// TODO
-#define SWIN_IMPL
-#include "../../../swin/swin.h"
+#include "window.h"
 
 typedef struct {
-    u32 width;
-    u32 height;
-    Swin swin;
-    u32* pixels;
+    int width;
+    int height;
+    WindowState window;
+    uint32_t* pixels;
 } State;
 
+// Called the first time the library is loaded to initialize persistent state
 dll_export State* init() {
     State* state = malloc(sizeof(State));
     *state = (State){};
 
     state->width = 400;
     state->height = 300;
-    state->swin = swinInit((SwinInitInfo){.width = state->width, .height = state->height});
-    swinSetWindowFlags(state->swin, SwinWindow_Topmost);
-    state->pixels = (u32*)malloc(state->width * state->height * sizeof(u32));
+    state->window = window_init(state->width, state->height);
+    state->pixels = (uint32_t*)malloc(state->width * state->height * sizeof(uint32_t));
 
     return state;
 }
 
+// Called each frame as long as the window is open
 dll_export bool update(State* state) {
-    swinDraw(state->swin, state->pixels);
-
-    for (u32 i = 0; i < state->width * state->height; i++) {
-        u8 r = 255, g = 0, b = 0, a = 255;
-        state->pixels[i] = (a << 24) | (b << 16) | (g << 8) | r;
+    for (int i = 0; i < state->width * state->height; i++) {
+        // Try changing the RGB values and save the file while the hotreload app is running
+        uint8_t r = 255, g = 128, b = 128, a = 255;
+        state->pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
     }
+    window_draw(state->window, state->pixels);
 
-    return swinPoll(state->swin);
+    return window_poll(state->window);
 }

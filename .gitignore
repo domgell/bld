@@ -1,0 +1,14 @@
+.DS_Store
+.idea/
+.vscode/
+.clang-tidy
+
+main
+build
+
+*.out
+*.exe
+*.exp
+*.lib
+*.so
+*.dll

@@ -1,3 +1,5 @@
+// cc build.c -o build && ./build
+
 #define BLD_IMPL
 #include "../../bld.h"
 
@@ -11,7 +13,7 @@ int main() {
     bld_cmd_add(&build_cmd, src);
     bld_cmd_add(&build_cmd, "-shared");
     bld_cmd_add(&build_cmd, "-fPIC");
-    bld_cmd_add(&build_cmd, "-lX11 -lXi"); // Windowing
+    bld_cmd_add(&build_cmd, "-lX11"); // Windowing
     bld_cmd_add(&build_cmd, "-o");
     bld_cmd_add(&build_cmd, out);
     bld_assert(bld_cmd_run(&build_cmd) == 0);
