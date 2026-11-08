@@ -4,8 +4,8 @@
 #include "../../bld.h"
 
 int main() {
-    const char* out = "main";
     const char* src = "main.c";
+    const char* out = "main";
 
     BldCmd build = bld_cmd_new();
     bld_cmd_add(&build, "cc");
