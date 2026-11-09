@@ -46,7 +46,7 @@ while (update_fn(game)) {
     // Automatically rebuild game DLL when source files change
     if (bld_dir_modified(src_path)) {
         bld_cmd_run(&build_cmd);
-        bld_lib_reload(&lib);
+        lib = bld_lib_new(dll_path);
         update_fn = bld_lib_load_fn(&lib, "update");
     }
 }

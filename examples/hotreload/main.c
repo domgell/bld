@@ -9,7 +9,7 @@ typedef struct {
     uint32_t* pixels;
 } State;
 
-// Called the first time the library is loaded to initialize persistent state
+// Called the first time the program is compiled to initialize persistent state
 dll_export State* init() {
     State* state = malloc(sizeof(State));
     *state = (State){};

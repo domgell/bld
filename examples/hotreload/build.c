@@ -23,28 +23,25 @@ int main() {
     void* (*init)() = bld_lib_load_fn(&lib, "init");
     bool (*update)(void*) = bld_lib_load_fn(&lib, "update");
 
-    // Watch for file changes
-    BldWatcher src_watcher = bld_watcher_new(src);
-    u32 reload_count = 0;
+    int reload_count = 0;
 
     void* state = init();
     while (update(state)) {
-        // Perform hot reload if source file changes
-        if (bld_watcher_check(&src_watcher)) {
+        // Watch for file changes
+        if (bld_path_is_modified(src)) {
             bld_log_info("Reloading...");
 
             // Set new out path and rebuild library
-            const char* lib_path = bld_fmt("/tmp/main%d.so", reload_count++);
+            const char* new_lib_path = bld_fmt("/tmp/main%d.so", reload_count++);
             bld_cmd_pop(&build_cmd);
-            bld_cmd_add(&build_cmd, lib_path);
+            bld_cmd_add(&build_cmd, new_lib_path);
             if (bld_cmd_run(&build_cmd) != 0) {
                 bld_log_error("Reload failed");
                 continue;
             }
 
             // Reload the library
-            bld_lib_unload(&lib);
-            lib = bld_lib_new(lib_path);
+            lib = bld_lib_new(new_lib_path);
             update = bld_lib_load_fn(&lib, "update");
         }
     }
