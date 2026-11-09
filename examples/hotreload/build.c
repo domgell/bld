@@ -3,7 +3,9 @@
 #define BLD_IMPL
 #include "../../bld.h"
 
-int main() {
+int main(int argc, const char** argv) {
+    bld_self_rebuild(argc, argv);
+
     const char* out = "/tmp/main.so";
     const char* src = "main.c";
 

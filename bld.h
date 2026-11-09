@@ -1,8 +1,23 @@
-#pragma once
+#ifndef BLD_H
+#define BLD_H
 
-// TEMP
+// Try to infer platform
+#if defined _WIN32
+#define BLD_PLATFORM_WINDOWS
+#elif defined __linux__
+#define BLD_PLATFORM_LINUX
+#elif defined __APPLE__
+#define BLD_PLATFORM_APPLE
+#else
+#define BLD_PLATFORM_UNKNOWN
+#warning "Cannot to infer BLD_PLATFORM macro"
+#endif
+
+#ifdef BLD_PLATFORM_LINUX
 #define _XOPEN_SOURCE 700
+#endif
 
+#ifndef BLD_NO_TYPEDEF
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -18,18 +33,33 @@ typedef int64_t i64;
 typedef float f32;
 typedef double f64;
 typedef const char* cstr;
-
-#define BLD_MAX_CMD_LEN 4096
+#endif
 
 cstr bld_fmt(cstr str, ...);
 void bld_panic(cstr msg, ...);
+
+// --------------------------------------- :log ----------------------------------------
+
 void bld_log_info(cstr msg, ...);
 void bld_log_error(cstr msg, ...);
 void bld_log_warning(cstr msg, ...);
 
-// void bld_run_self(int argc, char** argv);
+void bld_timer_begin(cstr msg);
+void bld_timer_end();
+
+// Rebuild and rerun the current build file if the build file was modified
+// after the build executable was created.
+// This means after compiling the build file once, it will always rebuild itself
+// whenever it has been editted.
+#define bld_self_rebuild(argc, argv) _bld_self_rebuild(argc, argv, __FILE__)
 
 // --------------------------------------- :cmd ----------------------------------------
+
+// Maximum number of characters allowed per command.
+// Includes spaces added by `bld_cmd_add()`
+#ifndef BLD_MAX_CMD_LEN
+#define BLD_MAX_CMD_LEN 4096
+#endif
 
 typedef struct {
     char str[BLD_MAX_CMD_LEN];
@@ -62,18 +92,6 @@ BldLib bld_lib_new(cstr path);
 void bld_lib_unload(BldLib* lib);
 void* bld_lib_load_fn(BldLib* lib, cstr fn_name);
 
-// // ------------------------------------- :watcher --------------------------------------
-//
-// typedef struct {
-//     cstr path;
-//     u64 last_modified_time;
-//     u64 last_check_time;
-//     f32 check_interval_seconds;
-// } BldWatcher;
-//
-// BldWatcher bld_watcher_new(cstr path);
-// bool bld_watcher_check(BldWatcher* watcher);
-
 // --------------------------------------- :path ----------------------------------------
 
 // Returns true if a file/folder exists at the given path.
@@ -86,7 +104,9 @@ cstr bld_path_absolute(cstr path);
 // bool bld_path_remove(cstr path);
 // cstr bld_path_file_extension(cstr path);
 
+#ifndef BLD_PATH_ITER_MAX_DEPTH
 #define BLD_PATH_ITER_MAX_DEPTH 32
+#endif
 
 typedef struct {
     cstr path;
@@ -102,43 +122,83 @@ typedef struct {
 
 BldPathIter bld_path_iter_new(cstr path);
 // Returns a temporary string of the next path
+// Returns NULL when the iterator is finished.
 cstr bld_path_iter_next(BldPathIter* iter);
+
+// Returns the last modified time of the file/folder
+// at the given path in nanoseconds since unspecified epoch.
+u64 bld_path_modified_time(cstr path);
 
 // Recursively checks if the path was modified since 
 // the last call to `bld_path_is_modified` with the same path.
 bool bld_path_is_modified(cstr path);
 
+// --------------------------------------- :time ---------------------------------------
+
+// Returns the current time in nanoseconds since unspecified epoch.
+u64 bld_time_now_nano();
+
 // --------------------------------------- :impl ---------------------------------------
 
 #ifdef BLD_IMPL
 
-// libc
+// C standard library includes
+#ifndef BLD_NO_CSTD
 #include <stdio.h>
-#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdarg.h>
+#endif
 
-// Platform
-// TODO: platform macro
+// Platform includes for using files, dynamic libraries, time, etc.
+#ifdef BLD_PLATFORM_LINUX
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#elif BLD_PLATFORM_WINDOWS
+// TODO
+#endif
 
 // ----------------------------------- :impl.macros ------------------------------------
 
+// Maximum size of the temp allocator until it wraps around to the start
+// Default 4 MB
 #ifndef BLD_MAX_TEMP_BYTES
 #define BLD_MAX_TEMP_BYTES 1024 * 1024 * 4
 #endif
 
+// Maximum size of the persistent allocator which exists for the entire program lifetime
+// Default 4 MB
 #ifndef BLD_MAX_PERSISTENT_BYTES
 #define BLD_MAX_PERSISTENT_BYTES 1024 * 1024 * 4
 #endif
 
 // TODO: format assert condition in bld_panic message
+#ifndef bld_assert
 #define bld_assert(condition) do { if (!(condition)) bld_panic("assertion failed"); } while(0);
+#endif
+
+#ifndef BLD_CC
+#ifdef BLD_PLATFORM_LINUX
+#define BLD_CC "cc"
+#elif defined BLD_PLATFORM_WINDOWS
+#define BLD_CC "cl"
+#else
+#define BLD_CC "cc"
+#endif
+#endif
+
+#ifndef BLD_TEMP_FOLDER
+#ifdef BLD_PLATFORM_LINUX
+#define BLD_TEMP_FOLDER "/tmp"
+#elif defined BLD_PLATFORM_WINDOWS
+#define BLD_TEMP_FOLDER "C:\\Temp"
+#else
+#define BLD_TEMP_FOLDER "/tmp"
+#endif
+#endif
 
 // --------------------------------------- :impl ---------------------------------------
 
@@ -203,6 +263,31 @@ void bld_panic(cstr msg, ...) {
     exit(1);
 }
 
+void _bld_self_rebuild(i32 argc, const char** argv, cstr current_file) {
+    cstr exe_path = bld_path_absolute(argv[0]);
+    u64 exe_modified_time = bld_path_modified_time(exe_path);
+
+    cstr src_path = bld_path_absolute(current_file);
+    u64 src_modified_time = bld_path_modified_time(src_path);
+
+    if (src_modified_time <= exe_modified_time) return;
+
+    // TODO: custom self rebuild command
+    bld_log_info("Build file modified, performing self rebuild...");
+    BldCmd cmd = bld_cmd_new();
+    bld_cmd_add(&cmd, "cc");
+    bld_cmd_add(&cmd, src_path);
+    bld_cmd_add(&cmd, "-g");
+    bld_cmd_add(&cmd, "-o");
+    bld_cmd_add(&cmd, exe_path);
+    bld_assert(bld_cmd_run(&cmd) == 0 && "Failed to self rebuild");
+
+    // Relaunch the program
+    execv(exe_path, (char* const*)argv);
+}
+
+// ------------------------------------- :impl.log -------------------------------------
+
 void bld_log_error(cstr msg, ...) {
     va_list args;
     va_start(args, msg);
@@ -228,6 +313,22 @@ void bld_log_warning(cstr msg, ...) {
     va_end(args);
 
     fprintf(stdout, "[bld warning]: %s\n", formatted_msg);
+}
+
+// TODO: allow multiple timers
+static u64 _bld_timer_start_time;
+static cstr _bld_timer_msg;
+
+void bld_timer_begin(cstr msg) {
+    _bld_timer_msg = msg;
+    _bld_timer_start_time = bld_time_now_nano();
+}
+
+void bld_timer_end() {
+    u64 time = bld_time_now_nano() - _bld_timer_start_time;
+
+    f32 time_ms = (f32)time / 1000000.0f;
+    bld_log_info("%s (%.3f ms)", _bld_timer_msg, time_ms);
 }
 
 // ------------------------------------- :impl.cmd -------------------------------------
@@ -279,12 +380,9 @@ void* bld_lib_load_fn(BldLib* lib, cstr fn_name) {
     return fn;
 }
 
-// u64 _bld_time_now() {
-// }
-
 // ------------------------------------- :impl.path -------------------------------------
 
-u64 _bld_path_last_modified_time(cstr path) {
+u64 bld_path_modified_time(cstr path) {
     struct stat result;
     if (stat(path, &result) != 0) bld_panic("Failed to get last modified time for path '%s'", path);
     return result.st_mtime;
@@ -307,8 +405,8 @@ cstr bld_path_absolute(cstr path) {
     usize byte_len = strlen(result) + 1;
     char* absolute_path = _bld_temp_alloc(byte_len);
     memcpy(absolute_path, result, byte_len);
-
     free(result);
+
     return absolute_path;
 }
 
@@ -353,17 +451,16 @@ char** _bld_path_get_entries(cstr path, u32* count) {
 BldPathIter bld_path_iter_new(cstr path) {
     BldPathIter iter = {};
 
-    struct stat st;
-    if (stat(path, &st) != 0) bld_panic("Failed to access path '%s'", path);
-    if (!S_ISDIR(st.st_mode)) bld_panic("Path '%s' is not a folder", path);
+    if (!bld_path_is_file(path)) {
+        bld_log_error("Path '%s' is not a folder, returning empty path iterator", path);
+        return iter;
+    }
 
     _BldPathIterFrame* frame = &iter.stack[0];
     frame->path = path;
     frame->entries = _bld_path_get_entries(path, &frame->entry_count);
     frame->next_entry = 0;
-
     iter.stack_len = 1;
-
     return iter;
 }
 
@@ -371,24 +468,23 @@ cstr bld_path_iter_next(BldPathIter* iter) {
     while (iter->stack_len > 0) {
         _BldPathIterFrame* frame = &iter->stack[iter->stack_len - 1];
 
-        // Current folder has no more entries.
+        // Current folder has no more entries
         if (frame->next_entry >= frame->entry_count) {
             iter->stack_len--;
             continue;
         }
 
-        // Get next entry.
+        // Next entry
         cstr name = frame->entries[frame->next_entry++];
         cstr path = bld_fmt("%s/%s", frame->path, name);
 
-        struct stat st;
-        if (stat(path, &st) != 0) {
+        if (!bld_path_exists(path)) {
             bld_log_warning("Failed to access path '%s', skipping", path);
             continue;
         }
 
-        // Descend into subdirectories.
-        if (S_ISDIR(st.st_mode) && iter->stack_len < BLD_PATH_ITER_MAX_DEPTH) {
+        // Go into subdirectories
+        if (!bld_path_is_file(path) && iter->stack_len < BLD_PATH_ITER_MAX_DEPTH) {
             _BldPathIterFrame* child = &iter->stack[iter->stack_len++];
 
             child->path = path;
@@ -405,7 +501,7 @@ cstr bld_path_iter_next(BldPathIter* iter) {
 u64 _bld_path_hash(cstr str, usize len) {
     u64 hash = 5381;
     for (usize i = 0; i < len; i++) {
-        hash = ((hash << 5) + hash) + (u8)str[i]; // hash * 33 + c
+        hash = ((hash << 5) + hash) + (u8)str[i];
     }
     return hash;
 }
@@ -415,15 +511,32 @@ typedef struct {
     char* path;
 } _BldPathTimes;
 
-#define BLD_MAX_PATH_TIMES 256
+// Maximum number of unique absolute paths for `bld_path_is_modified()`
+#ifndef BLD_MAX_PATH_TIMES
+#define BLD_MAX_PATH_TIMES 1024
+#endif
+
+// Time interval between `bld_path_is_modified()` checks in nanoseconds.
+// This is to avoid excessive file api calls for folders with many subfolders.
+// Default is 100,000,000 nanoseconds (0.1 seconds).
+#ifndef BLD_PATH_MODIFIED_CHECK_INTERVAL_NANO
+#define BLD_PATH_MODIFIED_CHECK_INTERVAL_NANO 100000000
+#endif
 
 _BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
-    static _BldPathTimes* path_times = NULL;
+    static _BldPathTimes* path_times_map = NULL;
+    static u64 last_check_time = 0;
 
-    if (path_times == NULL) {
+    u64 time = bld_time_now_nano();
+    if (time - last_check_time < (u64)(BLD_PATH_MODIFIED_CHECK_INTERVAL_NANO)) {
+        return NULL;
+    }
+    last_check_time = time;
+
+    if (!path_times_map) {
         usize size = sizeof(_BldPathTimes) * BLD_MAX_PATH_TIMES;
-        path_times = _bld_persistent_alloc(size);
-        memset(path_times, 0, size);
+        path_times_map = _bld_persistent_alloc(size);
+        memset(path_times_map, 0, size);
     }
 
     u32 path_len = strlen(abs_path);
@@ -432,14 +545,14 @@ _BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
     usize index = hash % BLD_MAX_PATH_TIMES;
 
     for (usize i = 0; i < BLD_MAX_PATH_TIMES; i++) {
-        _BldPathTimes* entry = &path_times[index];
+        _BldPathTimes* entry = &path_times_map[index];
 
         // Insert new entry
         if (entry->path == NULL) {
             entry->path = _bld_persistent_alloc(path_len + 1);
             memcpy(entry->path, abs_path, path_len + 1);
 
-            entry->last_modified_time = _bld_path_last_modified_time(abs_path);
+            entry->last_modified_time = bld_path_modified_time(abs_path);
 
             return entry;
         }
@@ -452,16 +565,18 @@ _BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
         index = (index + 1) % BLD_MAX_PATH_TIMES;
     }
 
-    bld_panic("Path map is full, consider increasing BLD_MAX_PATH_TIMES");
+    bld_log_error("Path map is full, consider increasing BLD_MAX_PATH_TIMES");
     return NULL;
 }
 
 bool bld_path_is_modified(cstr path) {
     cstr abs_path = bld_path_absolute(path);
     _BldPathTimes* entry = _bld_path_modified_time_map(abs_path);
+    if (!entry) return false;
 
+    // Path is file, no need to search recursively
     if (bld_path_is_file(path)) {
-        u64 last_modified_time = _bld_path_last_modified_time(abs_path);
+        u64 last_modified_time = bld_path_modified_time(abs_path);
         if (last_modified_time > entry->last_modified_time) {
             entry->last_modified_time = last_modified_time;
             return true;
@@ -469,10 +584,11 @@ bool bld_path_is_modified(cstr path) {
         return false;
     }
 
+    // Path is folder, search all inner files/folders
     BldPathIter iter = bld_path_iter_new(abs_path);
     cstr next;
     while ((next = bld_path_iter_next(&iter))) {
-        u64 last_modified_time = _bld_path_last_modified_time(next);
+        u64 last_modified_time = bld_path_modified_time(next);
         if (last_modified_time > entry->last_modified_time) {
             entry->last_modified_time = last_modified_time;
             return true;
@@ -482,4 +598,13 @@ bool bld_path_is_modified(cstr path) {
     return false;
 }
 
-#endif
+// ------------------------------------ :impl.time -------------------------------------
+
+u64 bld_time_now_nano() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
+}
+
+#endif // BLD_IMPL
+#endif // BLD_H

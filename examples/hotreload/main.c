@@ -1,5 +1,3 @@
-#define dll_export __attribute__((visibility("default")))
-
 #include "window.h"
 
 typedef struct {
@@ -8,6 +6,9 @@ typedef struct {
     WindowState window;
     uint32_t* pixels;
 } State;
+
+// Functions must be exported so they can be called by the build file
+#define dll_export __attribute__((visibility("default")))
 
 // Called the first time the program is compiled to initialize persistent state
 dll_export State* init() {
@@ -26,7 +27,7 @@ dll_export State* init() {
 dll_export bool update(State* state) {
     for (int i = 0; i < state->width * state->height; i++) {
         // Try changing the RGB values and save the file while the hotreload app is running
-        uint8_t r = 255, g = 128, b = 128, a = 255;
+        uint8_t r = 255, g = 0, b = 0, a = 255;
         state->pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
     }
     window_draw(state->window, state->pixels);
