@@ -74,9 +74,11 @@ void bld_cmd_add(BldCmd* cmd, cstr string);
 void bld_cmd_pop(BldCmd* cmd);
 i32 bld_cmd_run(BldCmd* cmd);
 
+// TODO
 // void bld_cmd_add_fmt(BldCmd* cmd, cstr fmt, ...);
 // void bld_cmd_clear(BldCmd* cmd);
 
+// TODO: capture command output
 // typedef struct {
 //     cstr error;
 //     cstr output;
@@ -84,6 +86,8 @@ i32 bld_cmd_run(BldCmd* cmd);
 // } BldCmdOut;
 //
 // BldCmdOut bld_cmd_run_output(BldCmd* cmd);
+
+// TODO: bld_cmd_run_async, bld_cmd_run_async_output
 
 // --------------------------------------- :lib ----------------------------------------
 
@@ -104,6 +108,7 @@ bool bld_path_is_file(cstr path);
 // Returns temporary string of the absolute path of the given path.
 cstr bld_path_absolute(cstr path);
 
+// TODO: path utilities
 // bool bld_path_remove(cstr path);
 // cstr bld_path_file_extension(cstr path);
 
@@ -179,7 +184,6 @@ u64 bld_time_now_nano();
 #define BLD_MAX_PERSISTENT_BYTES 1024 * 1024 * 4
 #endif
 
-// TODO: format assert condition in bld_panic message
 #ifndef bld_assert
 #define bld_assert(condition) do { if (!(condition)) bld_panic("assertion failed: %s", #condition, __FILE__, __LINE__); } while(0);
 #endif
@@ -333,7 +337,7 @@ void bld_log_warning(cstr msg, ...) {
     fprintf(stdout, "[bld warning]: %s\n", formatted_msg);
 }
 
-// TODO: allow multiple timers
+// TODO: stack to allow multiple timers
 static u64 _bld_timer_start_time;
 static cstr _bld_timer_msg;
 static bool _bld_timer_log_enabled = true;
