@@ -161,13 +161,17 @@ u64 bld_time_now_nano();
 #endif
 
 // Platform includes for using files, dynamic libraries, time, etc.
-#ifdef BLD_PLATFORM_LINUX
+#if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
-#elif BLD_PLATFORM_WINDOWS
-// TODO
+#elif defined(BLD_PLATFORM_WINDOWS)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <sys/stat.h>
+#include <process.h>
+#include <io.h>
 #endif
 
 // ----------------------------------- :impl.macros ------------------------------------
@@ -389,25 +393,42 @@ i32 bld_cmd_run(BldCmd* cmd) {
 
 // ------------------------------------- :impl.lib -------------------------------------
 
+#if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
+#define _bld_platform_lib_load(path)                    dlopen(path, RTLD_NOW | RTLD_LOCAL)
+#define _bld_platform_lib_error_str()                   dlerror()
+#define _bld_platform_lib_unload(handle)                dlclose(handle)
+#define _bld_platform_lib_load_fn(handle, name)         dlsym(handle, name)
+#elif defined(BLD_PLATFORM_WINDOWS)
+#define _bld_platform_lib_load(path)                    LoadLibraryA(path)
+// TODO: convert to proper string error message
+#define _bld_platform_lib_error_str()                   bld_fmt("Win32 error code: %d", GetLastError())
+#define _bld_platform_lib_unload(handle)                FreeLibrary(handle)
+#define _bld_platform_lib_load_fn(handle, name)         GetProcAddress(handle, name)
+#endif
+
 BldLib bld_lib_new(cstr path) {
     BldLib lib = {};
-    lib.handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-    if (!lib.handle) bld_panic("Failed to load library '%s'\n%s", path, dlerror());
+    lib.handle = _bld_platform_lib_load(path);
+    if (!lib.handle) bld_panic("Failed to load library '%s'\n%s", path, _bld_platform_lib_error_str());
     return lib;
 }
 
 void bld_lib_unload(BldLib* lib) {
-    dlclose(lib->handle);
+    bld_assert(lib->handle && "Lib is handle NULL or unloaded");
+    _bld_platform_lib_unload(lib->handle);
     lib->handle = NULL;
 }
 
 void* bld_lib_load_fn(BldLib* lib, cstr fn_name) {
-    void* fn = dlsym(lib->handle, fn_name);
-    if (!fn) bld_panic("Failed to load function '%s'\n%s", fn_name, dlerror());
+    bld_assert(lib->handle && "Lib is handle NULL or unloaded");
+    void* fn = _bld_platform_lib_load_fn(lib->handle, fn_name);
+    if (!fn) bld_panic("Failed to load function '%s'\n%s", fn_name, _bld_platform_lib_error_str());
     return fn;
 }
 
 // ------------------------------------- :impl.path -------------------------------------
+
+#if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
 
 u64 bld_path_modified_time(cstr path) {
     struct stat result;
@@ -474,6 +495,10 @@ char** _bld_path_get_entries(cstr path, u32* count) {
     *count = len;
     return entries;
 }
+
+#elif defined(BLD_PLATFORM_WINDOWS)
+// TODO
+#endif
 
 BldPathIter bld_path_iter_new(cstr path) {
     BldPathIter iter = {};
