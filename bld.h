@@ -394,16 +394,20 @@ i32 bld_cmd_run(BldCmd* cmd) {
 // ------------------------------------- :impl.lib -------------------------------------
 
 #if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
+
 #define _bld_platform_lib_load(path)                    dlopen(path, RTLD_NOW | RTLD_LOCAL)
 #define _bld_platform_lib_error_str()                   dlerror()
 #define _bld_platform_lib_unload(handle)                dlclose(handle)
 #define _bld_platform_lib_load_fn(handle, name)         dlsym(handle, name)
+
 #elif defined(BLD_PLATFORM_WINDOWS)
+
 #define _bld_platform_lib_load(path)                    LoadLibraryA(path)
 // TODO: convert to proper string error message
 #define _bld_platform_lib_error_str()                   bld_fmt("Win32 error code: %d", GetLastError())
 #define _bld_platform_lib_unload(handle)                FreeLibrary(handle)
 #define _bld_platform_lib_load_fn(handle, name)         GetProcAddress(handle, name)
+
 #endif
 
 BldLib bld_lib_new(cstr path) {
@@ -468,13 +472,13 @@ char** _bld_path_get_entries(cstr path, u32* count) {
     char** entries = _bld_temp_alloc(capacity * sizeof(char*));
 
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 ||
-            strcmp(entry->d_name, "..") == 0
-        ) {
+    while ((entry = readdir(dir))) {
+        // Skip
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
 
+        // Increase capacity
         if (len >= capacity) {
             capacity *= 2;
 
@@ -497,7 +501,94 @@ char** _bld_path_get_entries(cstr path, u32* count) {
 }
 
 #elif defined(BLD_PLATFORM_WINDOWS)
-// TODO
+
+// Number of 100-nanosecond intervals between January 1, 1606 (Win32 epoch) and January 1, 1970 (Unix epoch)
+#define _bld_time_win32_epoch_magic 116444736000000000ULL
+
+u64 bld_path_modified_time(cstr path) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    bool ok = GetFileAttributesExA(path, GetFileExInfoStandard, &data);
+    if (!ok) bld_panic("Failed to get last modified time for path '%s'", path);
+
+    ULARGE_INTEGER time;
+    time.LowPart = data.ftLastWriteTime.dwLowDateTime;
+    time.HighPart = data.ftLastWriteTime.dwHighDateTime;
+
+    return (time.QuadPart - _bld_time_win32_epoch_magic) * 100;
+}
+
+bool bld_path_exists(cstr path) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    return GetFileAttributesExA(path, GetFileExInfoStandard, &data);
+}
+
+bool bld_path_is_file(cstr path) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    bool ok = GetFileAttributesExA(path, GetFileExInfoStandard, &data);
+    if (!ok) bld_panic("Failed to access path '%s'", path);
+
+    return !(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+cstr bld_path_absolute(cstr path) {
+    DWORD result_len = GetFullPathNameA(path, 0, NULL, NULL);
+    if (result_len == 0) bld_panic("Failed to resolve absolute path '%s'", path);
+
+    char* result = _bld_temp_alloc(result_len * sizeof(char));
+    DWORD write_len = GetFullPathNameA(path, result_len, result, NULL);
+    bld_assert(write_len > 0 && write_len >= result_len);
+
+    return result;
+}
+
+char** _bld_path_get_entries(cstr path, u32* count) {
+    // Append wildcard to directory path.
+    usize path_len = strlen(path);
+    char* search_path = _bld_temp_alloc(path_len + 3);
+    memcpy(search_path, path, path_len);
+    search_path[path_len] = '\\';
+    search_path[path_len + 1] = '*';
+    search_path[path_len + 2] = '\0';
+
+    WIN32_FIND_DATAA find_data;
+    HANDLE find_handle = FindFirstFileA(search_path, &find_data);
+    bld_assert(find_handle != INVALID_HANDLE_VALUE && "Failed to open directory");
+
+    u32 capacity = 16;
+    u32 len = 0;
+    char** entries = _bld_temp_alloc(capacity * sizeof(char*));
+
+    do {
+        const char* name = find_data.cFileName;
+
+        // Skip
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            continue;
+        }
+
+        // Increase capacity
+        if (len >= capacity) {
+            capacity *= 2;
+
+            char** new_entries =_bld_temp_alloc(capacity * sizeof(char*));
+            memcpy(new_entries, entries, len * sizeof(char*));
+            entries = new_entries;
+        }
+
+        usize name_len = strlen(name) + 1;
+        char* entry_name = _bld_temp_alloc(name_len);
+        memcpy(entry_name, name, name_len);
+
+        entries[len++] = entry_name;
+    }
+    while (FindNextFileA(find_handle, &find_data));
+
+    FindClose(find_handle);
+
+    *count = len;
+    return entries;
+}
+
 #endif
 
 BldPathIter bld_path_iter_new(cstr path) {
@@ -558,7 +649,8 @@ u64 _bld_path_hash(cstr str, usize len) {
     return hash;
 }
 
-// Recursively check to get the maximum (most recent) path modified time
+// Recursively check to get the maximum (most recent) path modified time.
+// This can be slow since it must check every inner folder and file.
 u64 _bld_path_latest_modified_time(cstr abs_path) {
     // Path is file, no need to check recursively
     if (bld_path_is_file(abs_path)) {
@@ -676,11 +768,28 @@ bool bld_path_is_modified(cstr path) {
 
 // ------------------------------------ :impl.time -------------------------------------
 
+#if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
+
 u64 bld_time_now_nano() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
 }
+
+#elif defined(BLD_PLATFORM_WINDOWS)
+
+u64 bld_time_now_nano() {
+    FILETIME ft;
+    GetSystemTimePreciseAsFileTime(&ft);
+
+    ULARGE_INTEGER time;
+    time.LowPart = ft.dwLowDateTime;
+    time.HighPart = ft.dwHighDateTime;
+
+    return (time.QuadPart - _bld_time_win32_epoch_magic) * 100;
+}
+
+#endif
 
 #endif // BLD_IMPL
 #endif // BLD_H
