@@ -8,18 +8,18 @@
 #include <stdint.h>
 #include <string.h>
 
-typedef struct WindowState_t* WindowState;
+typedef struct ExampleWindow_t* ExampleWindow;
 
-WindowState window_init(int width, int height);
-bool window_poll(WindowState window);
-void window_draw(WindowState window, const uint32_t* pixels);
+ExampleWindow window_init(int width, int height);
+bool window_poll(ExampleWindow window);
+void window_draw(ExampleWindow window, const uint32_t* pixels);
 
 #if defined __linux
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
-struct WindowState_t {
+struct ExampleWindow_t {
     Display* display;
     Window window;
     bool quit;
@@ -27,9 +27,9 @@ struct WindowState_t {
     XImage* image;
 };
 
-WindowState window_init(int width, int height) {
-    WindowState window = malloc(sizeof(struct WindowState_t));
-    *window = (struct WindowState_t){};
+ExampleWindow window_init(int width, int height) {
+    ExampleWindow window = malloc(sizeof(struct ExampleWindow_t));
+    *window = (struct ExampleWindow_t){};
 
     window->display = XOpenDisplay(NULL);
     window->window = XCreateSimpleWindow(
@@ -55,7 +55,7 @@ WindowState window_init(int width, int height) {
     return window;
 }
 
-bool window_poll(WindowState window) {
+bool window_poll(ExampleWindow window) {
     if (!window) return false;
 
     if (window->quit) {
@@ -82,7 +82,7 @@ bool window_poll(WindowState window) {
     return true;
 }
 
-void window_draw(WindowState window, const uint32_t* pixels) {
+void window_draw(ExampleWindow window, const uint32_t* pixels) {
     memcpy(window->image->data, pixels, window->image->width * window->image->height * sizeof(uint32_t));
     XPutImage(window->display, window->window, window->gc, window->image, 0, 0, 0, 0, window->image->width,
         window->image->height);

@@ -1,9 +1,9 @@
-#include "window.h"
+#include "../example_window.h"
 
 typedef struct {
     int width;
     int height;
-    WindowState window;
+    ExampleWindow window;
     uint32_t* pixels;
 } State;
 
@@ -26,7 +26,7 @@ dll_export State* init() {
 // Called each frame as long as the window is open
 dll_export bool update(State* state) {
     for (int i = 0; i < state->width * state->height; i++) {
-        // Try changing the RGB values and save the file while the hotreload app is running
+        // Try changing the RGB values and save the file while the app is running
         uint8_t r = 255, g = 0, b = 0, a = 255;
         state->pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
     }

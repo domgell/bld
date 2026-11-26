@@ -35,18 +35,28 @@ typedef double f64;
 typedef const char* cstr;
 #endif
 
-cstr bld_fmt(cstr str, ...);
-void bld_panic(cstr msg, ...);
+// Attribute to get proper compiler warnings for printf-style format string literals
+#ifndef BLD_NO_FMT_ATTRIBUTE
+#if defined(__GNUC__) || defined(__clang__)
+#define BLD_FMT_VARAGS(fmt, args) __attribute__((format(printf, fmt, args)))
+#else
+#define BLD_FMT_VARAGS(fmt, args)
+#endif
+#endif
+
+// Format a string with printf-style formatting and return a temporary string.
+cstr bld_fmt(cstr str, ...) BLD_FMT_VARAGS(1, 2);
+void bld_panic(cstr msg, ...) BLD_FMT_VARAGS(1, 2);
 
 // --------------------------------------- :log ----------------------------------------
 
-void bld_log_info(cstr msg, ...);
-void bld_log_error(cstr msg, ...);
-void bld_log_warning(cstr msg, ...);
+void bld_log_info(cstr msg, ...) BLD_FMT_VARAGS(1, 2);
+void bld_log_error(cstr msg, ...) BLD_FMT_VARAGS(1, 2);
+void bld_log_warning(cstr msg, ...) BLD_FMT_VARAGS(1, 2);
 
 void bld_timer_begin(cstr msg);
-void bld_timer_end();
-// Set to enable/disable timer logging.
+u64 bld_timer_end();
+// Set to enable/disable timer logging from `bld_timer_end()`.
 // Enabled by default
 void bld_timer_log_enable(bool enable);
 
@@ -61,7 +71,7 @@ void bld_timer_log_enable(bool enable);
 // Maximum number of characters allowed per command.
 // Includes spaces added by `bld_cmd_add()`
 #ifndef BLD_MAX_CMD_LEN
-#define BLD_MAX_CMD_LEN 4096
+#define BLD_MAX_CMD_LEN (4096 - 4)
 #endif
 
 typedef struct {
@@ -74,10 +84,6 @@ void bld_cmd_add(BldCmd* cmd, cstr string);
 void bld_cmd_pop(BldCmd* cmd);
 i32 bld_cmd_run(BldCmd* cmd);
 
-// TODO
-// void bld_cmd_add_fmt(BldCmd* cmd, cstr fmt, ...);
-// void bld_cmd_clear(BldCmd* cmd);
-
 // TODO: capture command output
 // typedef struct {
 //     cstr error;
@@ -87,7 +93,9 @@ i32 bld_cmd_run(BldCmd* cmd);
 //
 // BldCmdOut bld_cmd_run_output(BldCmd* cmd);
 
-// TODO: bld_cmd_run_async, bld_cmd_run_async_output
+// TODO: run commands async
+// bld_cmd_run_async
+// bld_cmd_run_async_output
 
 // --------------------------------------- :lib ----------------------------------------
 
@@ -99,6 +107,32 @@ BldLib bld_lib_new(cstr path);
 void bld_lib_unload(BldLib* lib);
 void* bld_lib_load_fn(BldLib* lib, cstr fn_name);
 
+// --------------------------------------- :proc ---------------------------------------
+
+typedef struct {
+    void* handle;
+} BldProc;
+
+// Start a new process asynchronously.
+BldProc bld_proc_run(cstr path);
+// Start a new process asynchronously with null terminated arguments list.
+BldProc bld_proc_run_argv(cstr path, cstr* argv);
+
+// Force the process to terminate.
+// Waits until the process has terminated.
+void bld_proc_kill(BldProc* proc);
+
+// Returns true if the process is running.
+// Returns false if the process has exited or has been killed.
+bool bld_proc_is_running(BldProc* proc);
+
+// Wait indefinitely for the process to exit and return its exit code.
+i32 bld_proc_wait(BldProc* proc);
+// Wait for the process to exit with a timeout in nanoseconds.
+// Returns true if the process exited before the timeout and sets `exit_code`.
+// Returns false if the process is still running after the timeout and does not set `exit_code`.
+bool bld_proc_wait_timeout(BldProc* proc, u64 timeout_nano, i32* exit_code);
+
 // --------------------------------------- :path ----------------------------------------
 
 // Returns true if a file/folder exists at the given path.
@@ -109,6 +143,7 @@ bool bld_path_is_file(cstr path);
 cstr bld_path_absolute(cstr path);
 
 // TODO: path utilities
+// bool bld_path_create(cstr path);
 // bool bld_path_remove(cstr path);
 // cstr bld_path_file_extension(cstr path);
 
@@ -133,18 +168,22 @@ BldPathIter bld_path_iter_new(cstr path);
 // Returns NULL when the iterator is finished.
 cstr bld_path_iter_next(BldPathIter* iter);
 
-// Returns the last modified time of the file/folder
-// at the given path in nanoseconds since unspecified epoch.
-// Unlike `bld_path_is_modified()` it does not recursively check inner folders.
+// Recursively check to get the maximum (most recent) path modified time.
+// This can be slow since it must check every inner folder and file.
+u64 bld_path_latest_modified_time(cstr path);
+
+// Returns the last modified time of the file/folder at the given path in nanoseconds.
+// Unlike `bld_path_latest_modified_time()` it does not recursively check inner folders.
 u64 bld_path_modified_time(cstr path);
 
 // Recursively checks if the path was modified since 
-// the last call to `bld_path_is_modified` with the same path.
+// the last call to `bld_path_is_modified` for the same path.
+// Relative paths are converted to absolute paths.
 bool bld_path_is_modified(cstr path);
 
 // --------------------------------------- :time ---------------------------------------
 
-// Returns the current time in nanoseconds since unspecified epoch.
+// Returns the current time in nanoseconds since unix epoch.
 u64 bld_time_now_nano();
 
 // --------------------------------------- :impl ---------------------------------------
@@ -160,12 +199,17 @@ u64 bld_time_now_nano();
 #include <stdarg.h>
 #endif
 
-// Platform includes for using files, dynamic libraries, time, etc.
+// Platform includes for using files, dynamic libraries, processes, etc.
 #if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <sys/types.h>
+#include <spawn.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <errno.h>
 #elif defined(BLD_PLATFORM_WINDOWS)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -189,14 +233,17 @@ u64 bld_time_now_nano();
 #endif
 
 #ifndef bld_assert
-#define bld_assert(condition) do { if (!(condition)) bld_panic("assertion failed: %s", #condition, __FILE__, __LINE__); } while(0);
+#define bld_assert(condition) do { if (!(condition)) bld_panic("%s [%d]\nassertion failed: %s", __FILE__, __LINE__, #condition); } while(0);
 #endif
 
 #ifndef BLD_CC
 #ifdef BLD_PLATFORM_LINUX
 #define BLD_CC "cc"
 #elif defined BLD_PLATFORM_WINDOWS
-#define BLD_CC "cl"
+// Ideally, use clang or gcc on windows instead of MSVC
+// to be able to use the same CLI syntax as on other platforms.
+#define BLD_CC "clang"
+// #define BLD_CC "cl"
 #else
 #define BLD_CC "cc"
 #endif
@@ -299,9 +346,9 @@ void _bld_self_rebuild(i32 argc, const char** argv, cstr current_file) {
     return;
 
 self_rebuild:;
-    // TODO: custom self rebuild command
+    // TODO: allow custom self rebuild command
     BldCmd rebuild_cmd = bld_cmd_new();
-    bld_cmd_add(&rebuild_cmd, "cc");
+    bld_cmd_add(&rebuild_cmd, BLD_CC);
     bld_cmd_add(&rebuild_cmd, src_path);
     bld_cmd_add(&rebuild_cmd, "-g");
     bld_cmd_add(&rebuild_cmd, "-o");
@@ -341,7 +388,7 @@ void bld_log_warning(cstr msg, ...) {
     fprintf(stdout, "[bld warning]: %s\n", formatted_msg);
 }
 
-// TODO: stack to allow multiple timers
+// TODO: stack to allow multiple timers, increase print/log indentation with each stack entry
 static u64 _bld_timer_start_time;
 static cstr _bld_timer_msg;
 static bool _bld_timer_log_enabled = true;
@@ -351,11 +398,13 @@ void bld_timer_begin(cstr msg) {
     _bld_timer_start_time = bld_time_now_nano();
 }
 
-void bld_timer_end() {
-    u64 time = bld_time_now_nano() - _bld_timer_start_time;
+u64 bld_timer_end() {
+    u64 time_ns = bld_time_now_nano() - _bld_timer_start_time;
 
-    f32 time_ms = (f32)time / 1000000.0f;
+    f32 time_ms = (f32)time_ns / 1000000.0f;
     if (_bld_timer_log_enabled) bld_log_info("%s (%.3f ms)", _bld_timer_msg, time_ms);
+
+    return time_ns;
 }
 
 void bld_timer_log_enable(bool enable) {
@@ -418,16 +467,120 @@ BldLib bld_lib_new(cstr path) {
 }
 
 void bld_lib_unload(BldLib* lib) {
-    bld_assert(lib->handle && "Lib is handle NULL or unloaded");
+    bld_assert(lib->handle && "Lib handle is NULL or unloaded");
     _bld_platform_lib_unload(lib->handle);
     lib->handle = NULL;
 }
 
 void* bld_lib_load_fn(BldLib* lib, cstr fn_name) {
-    bld_assert(lib->handle && "Lib is handle NULL or unloaded");
+    bld_assert(lib->handle && "Lib handle is NULL or unloaded");
     void* fn = _bld_platform_lib_load_fn(lib->handle, fn_name);
     if (!fn) bld_panic("Failed to load function '%s'\n%s", fn_name, _bld_platform_lib_error_str());
     return fn;
+}
+
+// ------------------------------------ :impl.proc -------------------------------------
+
+#if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
+
+extern char** environ;
+
+BldProc bld_proc_run_argv(cstr path, cstr* argv) {
+    pid_t pid;
+
+    int error = posix_spawn(&pid, path, NULL, NULL, (char*const *)argv, environ);
+    bld_assert(error == 0 && bld_fmt("Failed to spawn process %s: %s", path, strerror(error)));
+
+    BldProc proc = {};
+    proc.handle = (void*)(uintptr_t)pid;
+    return proc;
+}
+
+void bld_proc_kill(BldProc* proc) {
+    bld_assert(proc->handle && "Proc handle is NULL or process is not running");
+
+    pid_t pid = (pid_t)(uintptr_t)proc->handle;
+    kill(pid, SIGKILL);
+    proc->handle = NULL;
+}
+
+bool bld_proc_is_running(BldProc* proc) {
+    bld_assert(proc->handle && "Proc handle is NULL or process is not running");
+
+    pid_t pid = (pid_t)(uintptr_t)proc->handle;
+    int status;
+    pid_t result;
+    do {
+        result = waitpid(pid, &status, WNOHANG);
+    }
+    while (result < 0 && errno == EINTR);
+
+    if (result == 0) {
+        return true;
+    }
+
+    if (result == pid) {
+        // Process exited and was reaped. Exit status is discarded.
+        proc->handle = NULL;
+        return false;
+    }
+
+    // An error occurred.
+    bld_log_error("waitpid failed: %s", strerror(errno));
+    proc->handle = NULL;
+    return false;
+
+    // // Not running
+    // if (result != 0) {
+    //     proc->handle = NULL;
+    //     return false;
+    // }
+    //
+    // return true;
+}
+
+bool bld_proc_wait_timeout(BldProc* proc, u64 timeout_nano, i32* exit_code) {
+    bld_assert(proc->handle && "Proc handle is NULL or process is not running");
+
+    pid_t pid = (pid_t)(uintptr_t)proc->handle;
+    int status;
+    u64 start_time = bld_time_now_nano();
+
+    while (true) {
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result < 0 && errno != EINTR) {
+            bld_log_error("Failed to wait for process %d: %s", pid, strerror(errno));
+            return false;
+        }
+
+        // Process exited
+        if (result != 0) {
+            proc->handle = NULL;
+            if (exit_code) *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+            return true;
+        }
+
+        // Check timeout
+        u64 current_time = bld_time_now_nano();
+        if (current_time - start_time >= timeout_nano) {
+            return false;
+        }
+    }
+}
+
+#endif
+
+BldProc bld_proc_run(cstr path) {
+    cstr argv[] = {path, NULL};
+    return bld_proc_run_argv(path, argv);
+}
+
+i32 bld_proc_wait(BldProc* proc) {
+    i32 exit_code;
+    bool ok = bld_proc_wait_timeout(proc, UINT64_MAX, &exit_code);
+
+    if (!ok) return -1; // Failed to wait for process
+    return exit_code;
 }
 
 // ------------------------------------- :impl.path -------------------------------------
@@ -570,7 +723,7 @@ char** _bld_path_get_entries(cstr path, u32* count) {
         if (len >= capacity) {
             capacity *= 2;
 
-            char** new_entries =_bld_temp_alloc(capacity * sizeof(char*));
+            char** new_entries = _bld_temp_alloc(capacity * sizeof(char*));
             memcpy(new_entries, entries, len * sizeof(char*));
             entries = new_entries;
         }
@@ -649,17 +802,15 @@ u64 _bld_path_hash(cstr str, usize len) {
     return hash;
 }
 
-// Recursively check to get the maximum (most recent) path modified time.
-// This can be slow since it must check every inner folder and file.
-u64 _bld_path_latest_modified_time(cstr abs_path) {
+u64 bld_path_latest_modified_time(cstr path) {
     // Path is file, no need to check recursively
-    if (bld_path_is_file(abs_path)) {
-        return bld_path_modified_time(abs_path);
+    if (bld_path_is_file(path)) {
+        return bld_path_modified_time(path);
     }
 
     // Path is folder, search all inner files/folders
     u64 max_time = 0;
-    BldPathIter iter = bld_path_iter_new(abs_path);
+    BldPathIter iter = bld_path_iter_new(path);
     cstr next;
     while ((next = bld_path_iter_next(&iter))) {
         u64 last_modified_time = bld_path_modified_time(next);
@@ -682,7 +833,7 @@ typedef struct {
 #define BLD_MAX_PATH_TIMES 1024
 #endif
 
-_BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
+_BldPathTimes* _bld_path_time_map_insert(cstr abs_path) {
     static _BldPathTimes* path_times_map = NULL;
 
     // Init path times map once
@@ -706,7 +857,7 @@ _BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
             memcpy(entry->path, abs_path, path_len + 1);
 
             entry->last_check_time = bld_time_now_nano();
-            entry->last_modified_time = _bld_path_latest_modified_time(abs_path);
+            entry->last_modified_time = bld_path_latest_modified_time(abs_path);
 
             return entry;
         }
@@ -723,7 +874,7 @@ _BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
     return NULL;
 }
 
-// Time interval between `bld_path_is_modified()` checks for a specific path in nanoseconds.
+// Time interval between `bld_path_is_modified()` checks, for a unique path, in nanoseconds.
 // This is to avoid excessive file api calls for folders with many subfolders.
 // Default is 100,000,000 nanoseconds (0.1 seconds).
 #ifndef BLD_PATH_MODIFIED_CHECK_INTERVAL_NANO
@@ -732,7 +883,7 @@ _BldPathTimes* _bld_path_modified_time_map(cstr abs_path) {
 
 bool bld_path_is_modified(cstr path) {
     cstr abs_path = bld_path_absolute(path);
-    _BldPathTimes* entry = _bld_path_modified_time_map(abs_path);
+    _BldPathTimes* entry = _bld_path_time_map_insert(abs_path);
     if (!entry) return false; // Path map is full
 
     // Check interval
