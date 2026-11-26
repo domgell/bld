@@ -6,7 +6,7 @@
 int main(int argc, const char** argv) {
     bld_self_rebuild(argc, argv);
 
-    const char* out = "/tmp/main.so";
+    const char* out = "/tmp/main";
     const char* src = "main.c";
 
     // Compile the app for the first time
@@ -29,7 +29,7 @@ int main(int argc, const char** argv) {
             bld_log_info("Rebuilding...");
 
             // Set new out path and rebuild app
-            const char* new_out_path = bld_fmt("/tmp/main%d.so", reload_count++);
+            const char* new_out_path = bld_fmt("/tmp/main%d", reload_count++);
             bld_cmd_pop(&build_cmd);
             bld_cmd_add(&build_cmd, new_out_path);
             if (bld_cmd_run(&build_cmd) != 0) {

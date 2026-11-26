@@ -330,7 +330,7 @@ void _bld_self_rebuild(i32 argc, const char** argv, cstr current_file) {
     cstr src_path = bld_path_absolute(current_file);
     u64 src_modified_time = bld_path_modified_time(src_path);
     if (src_modified_time > exe_modified_time) {
-        bld_log_info("%s modified, performing self rebuild...", current_file);
+        bld_log_info("%s modified, performing self rebuild...", src_path);
         goto self_rebuild;
     }
 
@@ -338,7 +338,7 @@ void _bld_self_rebuild(i32 argc, const char** argv, cstr current_file) {
     cstr bld_header_path = bld_path_absolute(__FILE__);
     u64 bld_header_modified_time = bld_path_modified_time(bld_header_path);
     if (bld_header_modified_time > exe_modified_time) {
-        bld_log_info("%s modified, performing self rebuild...", __FILE__);
+        bld_log_info("%s modified, performing self rebuild...", bld_header_path);
         goto self_rebuild;
     }
 
@@ -361,31 +361,74 @@ self_rebuild:;
 
 // ------------------------------------- :impl.log -------------------------------------
 
+#ifndef BLD_LOG_REPEAT_COUNTER_MAX_STR_LEN
+#define BLD_LOG_REPEAT_COUNTER_MAX_STR_LEN 512
+#endif
+
+static char _bld_previous_log[BLD_LOG_REPEAT_COUNTER_MAX_STR_LEN] = {};
+static u32 _bld_previous_log_increment = 0;
+
+#define _bld_ansi_line_clear "\033[1A\033[2K"
+#define _bld_ansi_text_bold "\033[1m"
+#define _bld_ansi_text_reset "\033[0m"
+#define _bld_ansi_color_red "\033[31m"
+#define _bld_ansi_color_yellow "\033[33m"
+#define _bld_ansi_color_green "\033[32m"
+
+// Counter for repeated log messages.
+// Enabled by default.
+// Might not work correctly in some terminals.
+#ifndef BLD_LOG_DISABLE_REPEAT_COUNTER
+void _bld_log_str(cstr msg, FILE* stream) {
+    if (strcmp(msg, _bld_previous_log) == 0) {
+        _bld_previous_log_increment++;
+
+        // Clear previous line
+        fprintf(stream, _bld_ansi_line_clear);
+        fflush(stream);
+
+        fprintf(stream, "%s (x%d)\n", msg, _bld_previous_log_increment + 1);
+    }
+    else {
+        fprintf(stream, "%s\n", msg);
+        strcpy(_bld_previous_log, msg);
+        _bld_previous_log_increment = 0;
+    }
+}
+#else
+void _bld_log_str(cstr msg, FILE* stream) {
+    fprintf(stream, "%s\n", msg);
+}
+#endif
+
 void bld_log_error(cstr msg, ...) {
     va_list args;
     va_start(args, msg);
-    cstr formatted_msg = _bld_fmt_va(msg, args);
+    cstr fmt_msg = _bld_fmt_va(msg, args);
     va_end(args);
 
-    fprintf(stderr, "[bld error]: %s\n", formatted_msg);
+    cstr log_str = bld_fmt(_bld_ansi_color_red "[bld error]" _bld_ansi_text_reset " %s", fmt_msg);
+    _bld_log_str(log_str, stderr);
 }
 
 void bld_log_info(cstr msg, ...) {
     va_list args;
     va_start(args, msg);
-    cstr formatted_msg = _bld_fmt_va(msg, args);
+    cstr fmt_msg = _bld_fmt_va(msg, args);
     va_end(args);
 
-    fprintf(stdout, "[bld]: %s\n", formatted_msg);
+    cstr log_str = bld_fmt(_bld_ansi_color_green "[bld]" _bld_ansi_text_reset " %s", fmt_msg);
+    _bld_log_str(log_str, stdout);
 }
 
 void bld_log_warning(cstr msg, ...) {
     va_list args;
     va_start(args, msg);
-    cstr formatted_msg = _bld_fmt_va(msg, args);
+    cstr fmt_msg = _bld_fmt_va(msg, args);
     va_end(args);
 
-    fprintf(stdout, "[bld warning]: %s\n", formatted_msg);
+    cstr log_str = bld_fmt(_bld_ansi_color_yellow "[bld warning]" _bld_ansi_text_reset " %s", fmt_msg);
+    _bld_log_str(log_str, stdout);
 }
 
 // TODO: stack to allow multiple timers, increase print/log indentation with each stack entry
@@ -515,28 +558,13 @@ bool bld_proc_is_running(BldProc* proc) {
     }
     while (result < 0 && errno == EINTR);
 
-    if (result == 0) {
-        return true;
-    }
-
-    if (result == pid) {
-        // Process exited and was reaped. Exit status is discarded.
+    // Not running
+    if (result != 0) {
         proc->handle = NULL;
         return false;
     }
 
-    // An error occurred.
-    bld_log_error("waitpid failed: %s", strerror(errno));
-    proc->handle = NULL;
-    return false;
-
-    // // Not running
-    // if (result != 0) {
-    //     proc->handle = NULL;
-    //     return false;
-    // }
-    //
-    // return true;
+    return true;
 }
 
 bool bld_proc_wait_timeout(BldProc* proc, u64 timeout_nano, i32* exit_code) {
@@ -584,6 +612,9 @@ i32 bld_proc_wait(BldProc* proc) {
 }
 
 // ------------------------------------- :impl.path -------------------------------------
+
+// *DEPRECATED*
+#define _bld_path_latest_modified_time(path) bld_path_latest_modified_time(path)
 
 #if defined(BLD_PLATFORM_LINUX) || defined(BLD_PLATFORM_APPLE)
 
