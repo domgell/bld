@@ -596,6 +596,27 @@ bool bld_proc_wait_timeout(BldProc* proc, u64 timeout_nano, i32* exit_code) {
     }
 }
 
+#elif defined(BLD_PLATFORM_WINDOWS)
+
+BldProc bld_proc_run_argv(cstr path, cstr* argv) {
+    bld_panic("TODO: proc not implemented for Win32");
+    return (BldProc){};
+}
+
+void bld_proc_kill(BldProc* proc) {
+    bld_panic("TODO: proc not implemented for Win32");
+}
+
+bool bld_proc_is_running(BldProc* proc) {
+    bld_panic("TODO: proc not implemented for Win32");
+    return false;
+}
+
+bool bld_proc_wait_timeout(BldProc* proc, u64 timeout_nano, i32* exit_code) {
+    bld_panic("TODO: proc not implemented for Win32");
+    return false;
+}
+
 #endif
 
 BldProc bld_proc_run(cstr path) {
