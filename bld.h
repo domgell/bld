@@ -253,7 +253,7 @@ u64 bld_time_now_nano();
 #ifdef BLD_PLATFORM_LINUX
 #define BLD_TEMP_FOLDER "/tmp"
 #elif defined BLD_PLATFORM_WINDOWS
-#define BLD_TEMP_FOLDER "C:\\Temp"
+#define BLD_TEMP_FOLDER "C:\\Windows\\Temp"
 #else
 #define BLD_TEMP_FOLDER "/tmp"
 #endif
@@ -741,7 +741,7 @@ cstr bld_path_absolute(cstr path) {
 
     char* result = _bld_temp_alloc(result_len * sizeof(char));
     DWORD write_len = GetFullPathNameA(path, result_len, result, NULL);
-    bld_assert(write_len > 0 && write_len >= result_len);
+    bld_assert(write_len > 0 && write_len < result_len);
 
     return result;
 }
